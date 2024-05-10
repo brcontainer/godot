@@ -4242,6 +4242,108 @@ void RendererSceneCull::set_scene_render(RendererSceneRender *p_scene_render) {
 	geometry_instance_pair_mask = scene_render->geometry_instance_get_pair_mask();
 }
 
+/* INTERPOLATION API */
+
+void RendererSceneCull::update_interpolation_tick(bool p_process) {
+	// MultiMesh: Update interpolation in storage.
+	RSG::mesh_storage->update_interpolation_tick(p_process);
+
+	// INSTANCES
+
+	// Detect any that were on the previous transform list that are no longer active;
+	// we should remove them from the interpolate list.
+
+	for (const RID &rid : *_interpolation_data.instance_transform_update_list_prev) {
+		Instance *instance = instance_owner.get_or_null(rid);
+
+		bool active = true;
+
+		// No longer active? (Either the instance deleted or no longer being transformed.)
+		if (instance && !instance->on_interpolate_transform_list) {
+			active = false;
+			instance->on_interpolate_list = false;
+
+			// Make sure the most recent transform is set...
+			instance->transform = instance->transform_curr;
+
+			// ... and that both prev and current are the same, just in case of any interpolations.
+			instance->transform_prev = instance->transform_curr;
+
+			// Make sure instances are updated one more time to ensure the AABBs are correct.
+			_instance_queue_update(instance, true);
+		}
+
+		if (!instance) {
+			active = false;
+		}
+
+		if (!active) {
+			_interpolation_data.instance_interpolate_update_list.erase(rid);
+		}
+	}
+
+	// Now for any in the transform list (being actively interpolated), keep the previous transform
+	// value up to date, ready for the next tick.
+	if (p_process) {
+		for (const RID &rid : *_interpolation_data.instance_transform_update_list_curr) {
+			Instance *instance = instance_owner.get_or_null(rid);
+			if (instance) {
+				instance->transform_prev = instance->transform_curr;
+				instance->transform_checksum_prev = instance->transform_checksum_curr;
+				instance->on_interpolate_transform_list = false;
+			}
+		}
+	}
+
+	// We maintain a mirror list for the transform updates, so we can detect when an instance
+	// is no longer being transformed, and remove it from the interpolate list.
+	SWAP(_interpolation_data.instance_transform_update_list_curr, _interpolation_data.instance_transform_update_list_prev);
+
+	// Prepare for the next iteration.
+	_interpolation_data.instance_transform_update_list_curr->clear();
+}
+
+void RendererSceneCull::update_interpolation_frame(bool p_process) {
+	// MultiMesh: Update interpolation in storage.
+	RSG::mesh_storage->update_interpolation_frame(p_process);
+
+	if (p_process) {
+		real_t f = Engine::get_singleton()->get_physics_interpolation_fraction();
+
+		for (const RID &rid : _interpolation_data.instance_interpolate_update_list) {
+			Instance *instance = instance_owner.get_or_null(rid);
+			if (instance) {
+				TransformInterpolator::interpolate_transform_3d_via_method(instance->transform_prev, instance->transform_curr, instance->transform, f, instance->interpolation_method);
+
+#ifdef RENDERING_SERVER_DEBUG_PHYSICS_INTERPOLATION
+				print_line("\t\tinterpolated: " + rtos(instance->transform.origin.x) + "\t( prev " + rtos(instance->transform_prev.origin.x) + ", curr " + rtos(instance->transform_curr.origin.x) + " ) on tick " + itos(Engine::get_singleton()->get_physics_frames()));
+#endif
+
+				// Make sure AABBs are constantly up to date through the interpolation.
+				_instance_queue_update(instance, true);
+			}
+		}
+	}
+}
+
+void RendererSceneCull::set_physics_interpolation_enabled(bool p_enabled) {
+	_interpolation_data.interpolation_enabled = p_enabled;
+}
+
+void RendererSceneCull::InterpolationData::notify_free_instance(RID p_rid, Instance &r_instance) {
+	r_instance.on_interpolate_list = false;
+	r_instance.on_interpolate_transform_list = false;
+
+	if (!interpolation_enabled) {
+		return;
+	}
+
+	// If the instance was on any of the lists, remove.
+	instance_interpolate_update_list.erase_multiple_unordered(p_rid);
+	instance_transform_update_list_curr->erase_multiple_unordered(p_rid);
+	instance_transform_update_list_prev->erase_multiple_unordered(p_rid);
+}
+
 RendererSceneCull::RendererSceneCull() {
 	render_pass = 1;
 	singleton = this;

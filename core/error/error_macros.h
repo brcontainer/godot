@@ -832,4 +832,14 @@ void _err_flush_stdout();
 #define DEV_CHECK_ONCE(m_cond)
 #endif
 
+/**
+ * Physics Interpolation warnings.
+ * These are spam protection warnings.
+ */
+#define PHYSICS_INTERPOLATION_NODE_WARNING(m_object_id, m_string) \
+	_physics_interpolation_warning(FUNCTION_STR, __FILE__, __LINE__, m_object_id, m_string)
+
+#define PHYSICS_INTERPOLATION_WARNING(m_string) \
+	_physics_interpolation_warning(FUNCTION_STR, __FILE__, __LINE__, ObjectID(UINT64_MAX), m_string)
+
 #endif // ERROR_MACROS_H

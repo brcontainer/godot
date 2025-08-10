@@ -5,8 +5,8 @@ on:
 # Global Settings
 env:
   # Used for the cache key. Add version suffix to force clean build.
-  GODOT_BASE_BRANCH: 4.3
-  GODOT_CPP_BRANCH: 4.3
+  GODOT_BASE_BRANCH: stable
+  GODOT_CPP_BRANCH: stable
   SCONSFLAGS: verbose=yes warnings=extra werror=yes module_text_server_fb_enabled=yes
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -22,20 +22,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Editor w/ Mono (target=editor)
-            cache-name: linux-editor-mono
-            target: editor
-            sconsflags: module_mono_enabled=yes
-            bin: ./bin/godot.linuxbsd.editor.x86_64.mono
-            build-mono: true
-            tests: false # Disabled due freeze caused by mix Mono build and CI
-            doc-test: true
-            proj-conv: true
-            api-compat: true
-            artifact: true
-            # Validate godot-cpp compatibility on one arbitrary editor build.
-            godot-cpp: true
-
           - name: Editor with doubles and GCC sanitizers (target=editor, tests=yes, dev_build=yes, scu_build=yes, precision=double, use_asan=yes, use_ubsan=yes, linker=gold)
             cache-name: linux-editor-double-sanitizers
             target: editor
@@ -69,24 +55,6 @@ jobs:
             build-mono: false
             # Skip 2GiB artifact speeding up action.
             artifact: false
-
-          - name: Template w/ Mono, release (target=template_release, tests=yes)
-            cache-name: linux-template-mono
-            target: template_release
-            sconsflags: module_mono_enabled=yes
-            bin: ./bin/godot.linuxbsd.template_release.x86_64.mono
-            build-mono: false
-            tests: true
-            artifact: true
-
-          - name: Template w/ Mono, debug (target=template_debug, tests=yes)
-            cache-name: linux-template-mono-debug
-            target: template_debug
-            sconsflags: module_mono_enabled=yes
-            bin: ./bin/godot.linuxbsd.template_debug.x86_64.mono
-            build-mono: false
-            tests: true
-            artifact: true
 
           - name: Minimal template (target=template_release, tests=yes, everything disabled)
             cache-name: linux-template-minimal
@@ -143,18 +111,6 @@ jobs:
       - name: Setup GCC problem matcher
         uses: ammaraskar/gcc-problem-matcher@master
 
-      - name: Force remove preinstalled .NET SDKs
-        if: matrix.build-mono
-        run: |
-          sudo rm -rf /usr/share/dotnet/sdk/*
-
-      - name: Setup older .NET SDK as baseline
-        if: matrix.build-mono
-        uses: actions/setup-dotnet@v4
-        with:
-          # Targeting the oldest version we want to support to ensure it still builds.
-          dotnet-version: 8.0.100
-
       - name: Compilation
         uses: ./.github/actions/godot-build
         with:
@@ -177,17 +133,6 @@ jobs:
           cache-name: ${{ matrix.cache-name }}
         continue-on-error: true
 
-      - name: Generate C# glue
-        if: matrix.build-mono
-        run: |
-          ${{ matrix.bin }} --headless --generate-mono-glue ./modules/mono/glue
-
-      - name: Build .NET solutions
-        if: matrix.build-mono
-        run: |
-          dotnet --info
-          ./modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --godot-platform=linuxbsd
-
       - name: Prepare artifact
         if: matrix.artifact
         run: |
@@ -206,11 +151,6 @@ jobs:
           ${{ matrix.bin }} --version
           ${{ matrix.bin }} --help
           ${{ matrix.bin }} --headless --test --force-colors
-
-      - name: .NET source generators tests
-        if: matrix.build-mono
-        run: |
-          dotnet test modules/mono/editor/Godot.NET.Sdk/Godot.SourceGenerators.Tests
 
       # Check class reference
       - name: Check for class reference updates
